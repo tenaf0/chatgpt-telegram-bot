@@ -2,6 +2,7 @@ package hu.garaba;
 
 import com.theokanning.openai.completion.chat.ChatCompletionChoice;
 import com.theokanning.openai.completion.chat.ChatCompletionChunk;
+import hu.garaba.util.Either;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -10,14 +11,14 @@ import java.util.function.BiConsumer;
 import java.util.stream.Stream;
 
 public class Conversation {
-    private final Instant startTime;
+    private Instant lastUpdate;
 
     public Conversation() {
-        this.startTime = Instant.now();
+        this.lastUpdate = Instant.now();
     }
 
-    public Instant startTime() {
-        return startTime;
+    public Instant lastUpdate() {
+        return lastUpdate;
     }
 
     public record Turn(String role, String message) {}
@@ -31,9 +32,9 @@ public class Conversation {
     private boolean isMessageReconstructionInProcess = false;
     private String role = null;
     private StringBuilder sb = null;
-    private BiConsumer<String, Integer> updateFn = null;
+    private BiConsumer<String, Either<Integer, String>> updateFn = null;
 
-    public void initMessageReconstruction(String role, BiConsumer<String, Integer> updateFn) {
+    public void initMessageReconstruction(String role, BiConsumer<String, Either<Integer, String>> updateFn) {
         if (isMessageReconstructionInProcess) {
             throw new IllegalStateException("There is a message reconstruction already in process");
         }
@@ -52,7 +53,7 @@ public class Conversation {
             sb.append(msg);
             length = msg.length();
         }
-        updateFn.accept(sb.toString(), choice.getFinishReason() != null ? -1 : length);
+        updateFn.accept(sb.toString(), choice.getFinishReason() != null ? Either.right(choice.getFinishReason()) : Either.left(length));
         if (choice.getFinishReason() != null) {
             closeMessageReconstruction();
         }
@@ -64,6 +65,8 @@ public class Conversation {
         this.role = null;
         this.sb = null;
         this.updateFn = null;
+
+        this.lastUpdate = Instant.now();
     }
 
     public Stream<Turn> getTurnStream() {

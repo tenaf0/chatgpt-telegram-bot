@@ -11,6 +11,7 @@ import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -21,7 +22,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class Bot extends TelegramLongPollingBot {
-    private final OpenAiService openAiService = new OpenAiService(System.getenv("OPENAI_API_KEY"));
+
+    public static final System.Logger LOGGER = System.getLogger(Bot.class.getName());
+
+    private final OpenAiService openAiService = new OpenAiService(System.getenv("OPENAI_API_KEY"), Duration.ZERO);
 
     public Bot() {
         super(System.getenv("TELEGRAM_API_KEY"));
@@ -36,7 +40,11 @@ public class Bot extends TelegramLongPollingBot {
 
     private int sendMessage(long userId, String message) {
         try {
-            SendMessage sendMessage = SendMessage.builder().chatId(userId).text(message).build();
+            SendMessage sendMessage = SendMessage.builder()
+                    .parseMode("HTML")
+                    .chatId(userId)
+                    .text(message)
+                    .build();
             Message sentMessage = execute(sendMessage);
 
             return sentMessage.getMessageId();
@@ -48,7 +56,12 @@ public class Bot extends TelegramLongPollingBot {
 
     private void editMessage(long userId, long messageId, String newText) {
         try {
-            EditMessageText editRequest = EditMessageText.builder().chatId(userId).messageId((int) messageId).text(newText).build();
+            EditMessageText editRequest = EditMessageText.builder()
+                    .parseMode("HTML")
+                    .chatId(userId)
+                    .messageId((int) messageId)
+                    .text(newText)
+                    .build();
             execute(editRequest);
         } catch (TelegramApiException e) {
             e.printStackTrace();
@@ -62,7 +75,10 @@ public class Bot extends TelegramLongPollingBot {
         Message message = update.getMessage();
         var user = message.getFrom();
 
+        LOGGER.log(System.Logger.Level.INFO, "{0}: {1}", user.getId(), message.getText());
+
         List<Conversation> conversations = userConversations.computeIfAbsent(user.getId(), k -> {
+            LOGGER.log(System.Logger.Level.INFO, "Number of users: {0}", userConversations.size() + 1);
             var list = new ArrayList<Conversation>();
             list.add(new Conversation());
             return list;
@@ -76,7 +92,7 @@ public class Bot extends TelegramLongPollingBot {
 
         Conversation conversation = conversations.get(conversations.size()-1);
 
-        if (conversation.startTime().isBefore(Instant.now().minus(10, ChronoUnit.MINUTES))) {
+        if (conversation.lastUpdate().isBefore(Instant.now().minus(10, ChronoUnit.MINUTES))) {
             sendMessage(user.getId(), "Conversation cleared due to timeout");
             conversation = new Conversation();
             conversations.add(conversation);
@@ -93,10 +109,7 @@ public class Bot extends TelegramLongPollingBot {
                 .model("gpt-3.5-turbo")
                 .messages(conversation.getTurnStream().map(c -> new ChatMessage(c.role(), c.message())).toList())
                 .n(1)
-                .maxTokens(100)
                 .build();
-
-        System.out.println(chatRequest);
 
         class MessageId {
             int id = -1;
@@ -106,7 +119,7 @@ public class Bot extends TelegramLongPollingBot {
         executor.submit(() -> {
             final MessageId messageId = new MessageId();
             finalConversation.initMessageReconstruction(ChatMessageRole.ASSISTANT.value(), (s, diff) -> {
-                messageId.diffSum += Math.max(0, diff);
+                messageId.diffSum += diff.isLeft() ? diff.left() : 0;
 
                 if (messageId.id == -1) {
                     if (s != null && !"".equals(s)) {
@@ -114,8 +127,9 @@ public class Bot extends TelegramLongPollingBot {
                         messageId.diffSum = 0;
                     }
                 } else {
-                    if (messageId.diffSum > 10 || diff == -1) {
-                        editMessage(user.getId(), messageId.id, s);
+                    if (messageId.diffSum > 20 || diff.isRight()) {
+                        String postfix = (diff.isRight() && !"stop".equals(diff.right())) ? (" <b>[" + diff.right().toUpperCase() + "]</b>") : "";
+                        editMessage(user.getId(), messageId.id, s + postfix);
                         messageId.diffSum = 0;
                     }
                 }
