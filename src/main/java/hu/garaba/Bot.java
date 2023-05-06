@@ -25,10 +25,15 @@ public class Bot extends TelegramLongPollingBot {
 
     public static final System.Logger LOGGER = System.getLogger(Bot.class.getName());
 
-    private final OpenAiService openAiService = new OpenAiService(System.getenv("OPENAI_API_KEY"), Duration.ZERO);
+    private static final String OPENAI_API_KEY = System.getenv("OPENAI_API_KEY");
+    private static final String TELEGRAM_API_KEY = System.getenv("TELEGRAM_API_KEY");
+
+    private final OpenAiService openAiService = new OpenAiService(OPENAI_API_KEY, Duration.ZERO);
 
     public Bot() {
-        super(System.getenv("TELEGRAM_API_KEY"));
+        super(TELEGRAM_API_KEY);
+
+        LOGGER.log(System.Logger.Level.INFO, "Started Bot");
     }
 
     @Override
@@ -41,7 +46,6 @@ public class Bot extends TelegramLongPollingBot {
     private int sendMessage(long userId, String message) {
         try {
             SendMessage sendMessage = SendMessage.builder()
-                    .parseMode("HTML")
                     .chatId(userId)
                     .text(message)
                     .build();
@@ -57,7 +61,6 @@ public class Bot extends TelegramLongPollingBot {
     private void editMessage(long userId, long messageId, String newText) {
         try {
             EditMessageText editRequest = EditMessageText.builder()
-                    .parseMode("HTML")
                     .chatId(userId)
                     .messageId((int) messageId)
                     .text(newText)
@@ -127,8 +130,8 @@ public class Bot extends TelegramLongPollingBot {
                         messageId.diffSum = 0;
                     }
                 } else {
-                    if (messageId.diffSum > 20 || diff.isRight()) {
-                        String postfix = (diff.isRight() && !"stop".equals(diff.right())) ? (" <b>[" + diff.right().toUpperCase() + "]</b>") : "";
+                    if (messageId.diffSum > 10 || diff.isRight()) {
+                        String postfix = (diff.isRight() && !"stop".equals(diff.right())) ? (" [" + diff.right().toUpperCase() + "]") : "";
                         editMessage(user.getId(), messageId.id, s + postfix);
                         messageId.diffSum = 0;
                     }
