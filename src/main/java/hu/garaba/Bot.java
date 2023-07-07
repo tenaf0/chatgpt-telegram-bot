@@ -11,12 +11,13 @@ import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -29,11 +30,19 @@ public class Bot extends TelegramLongPollingBot {
     private static final String TELEGRAM_API_KEY = System.getenv("TELEGRAM_API_KEY");
 
     private final OpenAiService openAiService = new OpenAiService(OPENAI_API_KEY, Duration.ZERO);
+    private Set<Long> whiteListedUserIds = new HashSet<>();
 
     public Bot() {
         super(TELEGRAM_API_KEY);
 
         LOGGER.log(System.Logger.Level.INFO, "Started Bot");
+        try {
+            Files.readAllLines(Path.of("whitelist.txt")).stream()
+                    .mapToLong(Long::parseLong)
+                    .forEach(whiteListedUserIds::add);
+        } catch (IOException e) {
+            LOGGER.log(System.Logger.Level.WARNING, e.getMessage());
+        }
     }
 
     @Override
@@ -79,6 +88,12 @@ public class Bot extends TelegramLongPollingBot {
         var user = message.getFrom();
 
         LOGGER.log(System.Logger.Level.INFO, "{0}: {1}", user.getId(), message.getText());
+        if (!whiteListedUserIds.contains(user.getId())) {
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "User {0} interacted with the bot, while not being part of the whitelist.", user);
+            sendMessage(user.getId(), "You are not allowed to interact with this bot!");
+            return;
+        }
 
         List<Conversation> conversations = userConversations.computeIfAbsent(user.getId(), k -> {
             LOGGER.log(System.Logger.Level.INFO, "Number of users: {0}", userConversations.size() + 1);
@@ -109,7 +124,7 @@ public class Bot extends TelegramLongPollingBot {
 
         ChatCompletionRequest chatRequest = ChatCompletionRequest
                 .builder()
-                .model("gpt-3.5-turbo")
+                .model("gpt-4-0613")
                 .messages(conversation.getTurnStream().map(c -> new ChatMessage(c.role(), c.message())).toList())
                 .n(1)
                 .build();
