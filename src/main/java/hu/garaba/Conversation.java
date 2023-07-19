@@ -1,75 +1,48 @@
 package hu.garaba;
 
-import com.theokanning.openai.completion.chat.ChatCompletionChoice;
-import com.theokanning.openai.completion.chat.ChatCompletionChunk;
-import hu.garaba.util.Either;
+import com.azure.ai.openai.models.ChatMessage;
+import com.azure.ai.openai.models.ChatRole;
+import hu.garaba.util.MutInteger;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.BiConsumer;
-import java.util.stream.Stream;
+import java.util.function.Consumer;
 
 public class Conversation {
-    private Instant lastUpdate;
+    public record Message(Instant date, MutInteger messageId, ChatRole role, MessageContent content) {}
+    private final List<Message> messages = new ArrayList<>();
+    private int promptToken = 0;
+    private int completionToken = 0;
 
-    public Conversation() {
-        this.lastUpdate = Instant.now();
+    public void recordMessage(ChatRole role, MessageContent content) {
+        messages.add(new Message(Instant.now(), new MutInteger(), role, content));
+        promptToken += OpenAI.approximateTokens(content.toString());
     }
 
-    public Instant lastUpdate() {
-        return lastUpdate;
+    public MessageUpdater streamMessage(ChatRole role, Consumer<MessageUpdater.Update> updateFn) {
+        Message message = new Message(Instant.now(), new MutInteger(), role, MessageContent.create(""));
+        messages.add(message);
+
+        return new MessageUpdater(u -> {
+            completionToken += u.completionTokenCount();
+            updateFn.accept(u);
+        }, message);
     }
 
-    public record Turn(String role, String message) {}
-    private final List<Turn> turns = new ArrayList<>();
-
-    public void recordMessage(String role, String message) {
-        turns.add(new Turn(role, message));
+    public int getPromptToken() {
+        return promptToken;
     }
 
-
-    private boolean isMessageReconstructionInProcess = false;
-    private String role = null;
-    private StringBuilder sb = null;
-    private BiConsumer<String, Either<Integer, String>> updateFn = null;
-
-    public void initMessageReconstruction(String role, BiConsumer<String, Either<Integer, String>> updateFn) {
-        if (isMessageReconstructionInProcess) {
-            throw new IllegalStateException("There is a message reconstruction already in process");
-        }
-        isMessageReconstructionInProcess = true;
-        this.role = role;
-        this.sb = new StringBuilder();
-        this.updateFn = updateFn;
+    public int getCompletionToken() {
+        return completionToken;
     }
 
-    public void addChunk(ChatCompletionChunk chunk) {
-        ChatCompletionChoice choice = chunk.getChoices().get(0);
-        String msg = choice.getMessage().getContent();
-
-        int length = 0;
-        if (msg != null) {
-            sb.append(msg);
-            length = msg.length();
-        }
-        updateFn.accept(sb.toString(), choice.getFinishReason() != null ? Either.right(choice.getFinishReason()) : Either.left(length));
-        if (choice.getFinishReason() != null) {
-            closeMessageReconstruction();
-        }
+    public Instant latestUpdate() {
+        return messages.get(messages.size() - 1).date;
     }
 
-    public void closeMessageReconstruction() {
-        isMessageReconstructionInProcess = false;
-        recordMessage(role, sb.toString());
-        this.role = null;
-        this.sb = null;
-        this.updateFn = null;
-
-        this.lastUpdate = Instant.now();
-    }
-
-    public Stream<Turn> getTurnStream() {
-        return turns.stream();
+    public List<ChatMessage> packageMessages() {
+        return messages.stream().map(m -> new ChatMessage(m.role).setContent(m.content.toString())).toList();
     }
 }
