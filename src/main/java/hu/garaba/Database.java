@@ -24,8 +24,7 @@ public class Database {
         }
     }
 
-    public record TokenUsage(int promptToken, int completionToken) {}
-    public TokenUsage getUsage(long userId) throws SQLException {
+    public Conversation.TokenUsage getUsage(long userId) throws SQLException {
         try (var st = connection.prepareStatement("SELECT prompt_token, completion_token FROM USERS WHERE user_id = ?")) {
             st.setLong(1, userId);
 
@@ -33,14 +32,14 @@ public class Database {
             if (!resultSet.next()) {
                 throw new IllegalArgumentException("No user found with userId " + userId);
             }
-            return new TokenUsage(resultSet.getInt(1), resultSet.getInt(1));
+            return new Conversation.TokenUsage(resultSet.getInt(1), resultSet.getInt(1));
         }
     }
 
-    public void writeUsage(long userId, long deltaPromptToken, long deltaCompletionToken) throws SQLException {
+    public void writeUsage(long userId, Conversation.TokenUsage tokenUsage) throws SQLException {
         try (var st = connection.prepareStatement("UPDATE USERS SET prompt_token = prompt_token + ?, completion_token = completion_token + ? WHERE user_id = ?")) {
-            st.setLong(1, deltaPromptToken);
-            st.setLong(2, deltaCompletionToken);
+            st.setLong(1, tokenUsage.promptToken());
+            st.setLong(2, tokenUsage.completionToken());
             st.setLong(3, userId);
 
             int i = st.executeUpdate();

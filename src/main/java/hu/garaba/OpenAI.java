@@ -9,6 +9,15 @@ import java.util.function.Consumer;
 
 public class OpenAI {
     public static final System.Logger LOGGER = System.getLogger(OpenAI.class.getCanonicalName());
+    private enum Model {
+        GPT_3_5_TURBO("gpt-3.5-turbo"),
+        GPT_4("gpt-4");
+
+        public final String name;
+        Model(String name) {
+            this.name = name;
+        }
+    }
 
     private final OpenAIClient client;
 
@@ -20,7 +29,7 @@ public class OpenAI {
 
     public void send(String userId, Conversation conv, Consumer<MessageUpdater.Update> updateFn) {
         LOGGER.log(System.Logger.Level.DEBUG, "Sending message to OpenAI");
-        IterableStream<ChatCompletions> completions = client.getChatCompletionsStream("gpt-3.5-turbo",
+        IterableStream<ChatCompletions> completions = client.getChatCompletionsStream(Model.GPT_4.name,
                 new ChatCompletionsOptions(conv.packageMessages())
                         .setUser(userId));
 

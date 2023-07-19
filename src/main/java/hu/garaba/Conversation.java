@@ -7,17 +7,18 @@ import hu.garaba.util.MutInteger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 public class Conversation {
     public record Message(Instant date, MutInteger messageId, ChatRole role, MessageContent content) {}
     private final List<Message> messages = new ArrayList<>();
-    private int promptToken = 0;
-    private int completionToken = 0;
+    private final AtomicInteger promptToken = new AtomicInteger(0);
+    private final AtomicInteger completionToken = new AtomicInteger(0);
 
     public void recordMessage(ChatRole role, MessageContent content) {
         messages.add(new Message(Instant.now(), new MutInteger(), role, content));
-        promptToken += OpenAI.approximateTokens(content.toString());
+        promptToken.addAndGet(OpenAI.approximateTokens(content.toString()));
     }
 
     public MessageUpdater streamMessage(ChatRole role, Consumer<MessageUpdater.Update> updateFn) {
@@ -25,17 +26,18 @@ public class Conversation {
         messages.add(message);
 
         return new MessageUpdater(u -> {
-            completionToken += u.completionTokenCount();
+            completionToken.getAndAdd(u.completionTokenCount());
             updateFn.accept(u);
         }, message);
     }
 
-    public int getPromptToken() {
-        return promptToken;
-    }
+    public record TokenUsage(int promptToken, int completionToken) {}
 
-    public int getCompletionToken() {
-        return completionToken;
+    /**
+     * Zeroes out the prompt and completion token counts for this Conversation
+     */
+    public TokenUsage resetTokenUsage() {
+        return new TokenUsage(promptToken.getAndSet(0), completionToken.getAndSet(0));
     }
 
     public Instant latestUpdate() {

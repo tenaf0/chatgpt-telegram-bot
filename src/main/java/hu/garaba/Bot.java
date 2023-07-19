@@ -11,26 +11,44 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.nio.file.Path;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 
 public class Bot extends TelegramLongPollingBot {
     public static final System.Logger LOGGER = System.getLogger(Bot.class.getCanonicalName());
 
-    private static final String TELEGRAM_BOT_KEY = System.getenv("TELEGRAM_API_KEY");
+    private static final String OPENAI_API_KEY = System.getenv("OPENAI_API_KEY");
+    private static final String TELEGRAM_API_KEY = System.getenv("TELEGRAM_API_KEY");
 
-    private final OpenAI openAI = new OpenAI(System.getenv("OPENAI_API_KEY"));
+    private final OpenAI openAI = new OpenAI(OPENAI_API_KEY);
     private final Database db;
 
+    private static final Duration CONVERSATION_CLEAR_PERIOD = Duration.of(15, ChronoUnit.MINUTES);
+
     public Bot() throws SQLException {
-        super(TELEGRAM_BOT_KEY);
+        super(TELEGRAM_API_KEY);
         this.db = new Database(Path.of("bot.db"));
 
         LOGGER.log(System.Logger.Level.INFO, "Starting bot");
+
+        ScheduledExecutorService conversationClearerExecutor = Executors.newScheduledThreadPool(1);
+        conversationClearerExecutor.scheduleWithFixedDelay(() -> {
+            LOGGER.log(System.Logger.Level.DEBUG, "Started flushing conversation statistics.");
+            int i = 0;
+            Instant now = Instant.now();
+            for (var entry : conversationMap.entrySet()) {
+                if (entry.getValue().latestUpdate().isBefore(now.minus(CONVERSATION_CLEAR_PERIOD))) {
+                    boolean hasFlushed = flushConversationStatistics(entry.getKey(), entry.getValue());
+                    if (hasFlushed)
+                        i++;
+                }
+            }
+            LOGGER.log(System.Logger.Level.DEBUG,
+                    "Finished flushing conversation statistics to db. Have flushed " + i + " entries.");
+        }, (long) (CONVERSATION_CLEAR_PERIOD.toMinutes() * 1.5), CONVERSATION_CLEAR_PERIOD.toMinutes(), TimeUnit.MINUTES);
     }
 
     @Override
@@ -41,6 +59,12 @@ public class Bot extends TelegramLongPollingBot {
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
     private final Map<Long, Conversation> conversationMap = new ConcurrentHashMap<>();
+
+    @Override
+    public synchronized void onClosing() {
+        LOGGER.log(System.Logger.Level.DEBUG, "Bot shutting down");
+        super.onClosing();
+    }
 
     @Override
     public void onUpdateReceived(Update update) {
@@ -68,7 +92,7 @@ public class Bot extends TelegramLongPollingBot {
                 clearConversation(user, conv);
             }
         } else if (text.startsWith("/usage")) {
-            Database.TokenUsage usage = null;
+            Conversation.TokenUsage usage = null;
             try {
                 usage = db.getUsage(user.getId());
             } catch (SQLException e) {
@@ -86,9 +110,10 @@ public class Bot extends TelegramLongPollingBot {
     private void handleConversation(User user, String text) {
         Conversation conv = conversationMap.computeIfAbsent(user.getId(), k -> initConversation(user));
 
-        if (conv.latestUpdate().isBefore(Instant.now().minus(15, ChronoUnit.MINUTES))) {
+        if (conv.latestUpdate().isBefore(Instant.now().minus(CONVERSATION_CLEAR_PERIOD))) {
             clearConversation(user, conv);
             conv = initConversation(user);
+            conversationMap.put(user.getId(), conv);
         }
 
         conv.recordMessage(ChatRole.USER, MessageContent.finished(text));
@@ -115,12 +140,27 @@ public class Bot extends TelegramLongPollingBot {
     }
 
     private void clearConversation(User user, Conversation conv) {
-        try {
-            db.writeUsage(user.getId(), conv.getPromptToken(), conv.getCompletionToken());
-        } catch (SQLException e) {
-            LOGGER.log(System.Logger.Level.DEBUG, "Failed to increase tokeCount of user " + user, e);
-        }
+        flushConversationStatistics(user.getId(), conv);
         sendMessage(user.getId(), "Conversation cleared");
+    }
+
+    /**
+     * @param userId
+     * @param conv
+     * @return true, if the Conversation's tokenUsage is not 0.
+     */
+    private boolean flushConversationStatistics(long userId, Conversation conv) {
+        Conversation.TokenUsage tokenUsage = conv.resetTokenUsage();
+        if (!(tokenUsage.promptToken() == 0 && tokenUsage.completionToken() == 0)) {
+            try {
+                db.writeUsage(userId, tokenUsage);
+                return true;
+            } catch (SQLException e) {
+                LOGGER.log(System.Logger.Level.DEBUG, "Failed to increase tokeCount of user with id " + userId, e);
+            }
+        }
+
+        return false;
     }
 
     private int sendMessage(long userId, String message) {
