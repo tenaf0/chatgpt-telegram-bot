@@ -43,7 +43,6 @@ public class MessageContent {
     }
 
     @Override
-
     public String toString() {
         return buffer + (isFinished ? "" : "...");
     }

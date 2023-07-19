@@ -32,7 +32,7 @@ public class Database {
             if (!resultSet.next()) {
                 throw new IllegalArgumentException("No user found with userId " + userId);
             }
-            return new Conversation.TokenUsage(resultSet.getInt(1), resultSet.getInt(1));
+            return new Conversation.TokenUsage(resultSet.getInt(1), resultSet.getInt(2));
         }
     }
 
