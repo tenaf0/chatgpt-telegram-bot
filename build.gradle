@@ -15,7 +15,7 @@ repositories {
 
 application {
     mainClassName = 'hu.garaba.Main'
-    applicationDefaultJvmArgs = ['--enable-preview', '-Dorg.slf4j.simpleLogger.defaultLogLevel=debug']
+    applicationDefaultJvmArgs = ['--enable-preview']
 }
 
 dependencies {

@@ -9,6 +9,8 @@ import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
+import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -103,6 +105,31 @@ public class Bot extends TelegramLongPollingBot {
                 sendMessage(user.getId(), "Your token usage: " + usage);
             } else {
                 sendMessage(user.getId(), "Failed to query your usage count.");
+            }
+        } else if (text.startsWith("/summarize")) {
+            String[] words = text.split("\\s+");
+            if (words.length < 2 || !Summarizer.isValidURL(words[1])) {
+                sendMessage(user.getId(),
+                        "The command is ill-formed, or you provided an illegal URL. The correct syntax: /summarize <url>");
+            } else {
+                URI uri = URI.create(words[1]);
+                try {
+                    String article = Summarizer.extractArticle(uri);
+                    Conversation conv = Summarizer.summarizeArticle(openAI, article, u -> {
+                        if (u.isStart()) {
+                            u.message().messageId().value = sendMessage(user.getId(), u.message().content().toString());
+                        } else {
+                            if (u.message().messageId().value == null) {
+                                throw new IllegalStateException("A message should be sent before it can be edited");
+                            }
+                            editMessage(user.getId(), u.message().messageId().value, u.message().content().toString());
+                        }
+                    });
+                    flushConversationStatistics(user.getId(), conv);
+                } catch (IOException e) {
+                    LOGGER.log(System.Logger.Level.DEBUG, "Failed to extract article at " + uri, e);
+                    sendMessage(user.getId(), "Failed to extract the linked article");
+                }
             }
         }
     }
