@@ -19,10 +19,14 @@ application {
 }
 
 dependencies {
-    implementation 'org.slf4j:slf4j-simple:2.0.7'
+    implementation 'org.apache.logging.log4j:log4j-slf4j2-impl:3.0.0-alpha1'
+    implementation("org.apache.logging.log4j:log4j-core:3.0.0-alpha1")
+    implementation("org.apache.logging.log4j:log4j-jpl:3.0.0-alpha1")
+
+    implementation 'org.xerial:sqlite-jdbc:3.42.0.0'
 
     implementation 'org.telegram:telegrambots:6.7.0'
-    implementation 'com.theokanning.openai-gpt3-java:service:0.14.0'
+    implementation 'com.azure:azure-ai-openai:1.0.0-beta.2'
 
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'

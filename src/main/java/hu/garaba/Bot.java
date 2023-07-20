@@ -1,56 +1,194 @@
 package hu.garaba;
 
-import com.theokanning.openai.completion.chat.ChatCompletionRequest;
-import com.theokanning.openai.completion.chat.ChatMessage;
-import com.theokanning.openai.completion.chat.ChatMessageRole;
-import com.theokanning.openai.service.OpenAiService;
+import com.azure.ai.openai.models.ChatRole;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.User;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.io.IOException;
-import java.nio.file.Files;
+import java.net.URI;
 import java.nio.file.Path;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.Map;
+import java.util.concurrent.*;
 
 public class Bot extends TelegramLongPollingBot {
-
-    public static final System.Logger LOGGER = System.getLogger(Bot.class.getName());
+    public static final System.Logger LOGGER = System.getLogger(Bot.class.getCanonicalName());
 
     private static final String OPENAI_API_KEY = System.getenv("OPENAI_API_KEY");
     private static final String TELEGRAM_API_KEY = System.getenv("TELEGRAM_API_KEY");
 
-    private final OpenAiService openAiService = new OpenAiService(OPENAI_API_KEY, Duration.ZERO);
-    private Set<Long> whiteListedUserIds = new HashSet<>();
+    private final OpenAI openAI = new OpenAI(OPENAI_API_KEY);
+    private final Database db;
 
-    public Bot() {
+    private static final Duration CONVERSATION_CLEAR_PERIOD = Duration.of(15, ChronoUnit.MINUTES);
+
+    public Bot() throws SQLException {
         super(TELEGRAM_API_KEY);
+        this.db = new Database(Path.of("bot.db"));
 
-        LOGGER.log(System.Logger.Level.INFO, "Started Bot");
-        try {
-            Files.readAllLines(Path.of("whitelist.txt")).stream()
-                    .mapToLong(Long::parseLong)
-                    .forEach(whiteListedUserIds::add);
-        } catch (IOException e) {
-            LOGGER.log(System.Logger.Level.WARNING, e.getMessage());
-        }
+        LOGGER.log(System.Logger.Level.INFO, "Starting bot");
+
+        ScheduledExecutorService conversationClearerExecutor = Executors.newScheduledThreadPool(1);
+        conversationClearerExecutor.scheduleWithFixedDelay(() -> {
+            LOGGER.log(System.Logger.Level.DEBUG, "Started flushing conversation statistics.");
+            int i = 0;
+            Instant now = Instant.now();
+            for (var entry : conversationMap.entrySet()) {
+                if (entry.getValue().latestUpdate().isBefore(now.minus(CONVERSATION_CLEAR_PERIOD))) {
+                    boolean hasFlushed = flushConversationStatistics(entry.getKey(), entry.getValue());
+                    if (hasFlushed)
+                        i++;
+                }
+            }
+            LOGGER.log(System.Logger.Level.DEBUG,
+                    "Finished flushing conversation statistics to db. Have flushed " + i + " entries.");
+        }, (long) (CONVERSATION_CLEAR_PERIOD.toMinutes() * 1.5), CONVERSATION_CLEAR_PERIOD.toMinutes(), TimeUnit.MINUTES);
     }
 
     @Override
     public String getBotUsername() {
-        return "tenaf_test_bot";
+        return "tenaf_test_bot2";
     }
 
-    private final Map<Long, List<Conversation>> userConversations = new ConcurrentHashMap<>();
+    private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+
+    private final Map<Long, Conversation> conversationMap = new ConcurrentHashMap<>();
+
+    @Override
+    public synchronized void onClosing() {
+        LOGGER.log(System.Logger.Level.DEBUG, "Bot shutting down");
+        super.onClosing();
+    }
+
+    @Override
+    public void onUpdateReceived(Update update) {
+        Message message = update.getMessage();
+        User user = message.getFrom();
+
+        executor.submit(() -> {
+            if (!db.isWhitelisted(user.getId())) {
+                sendMessage(user.getId(), "You are not authorized to access this bot.");
+                throw new SecurityException("User " + user + " accessed the bot, but was not found in the whitelist table.");
+            }
+
+            if (message.isCommand()) {
+                handleCommand(user, message.getText());
+            } else {
+                handleConversation(user, message.getText());
+            }
+        });
+    }
+
+    private void handleCommand(User user, String text) {
+        if (text.startsWith("/clear")) {
+            Conversation conv = conversationMap.get(user.getId());
+            if (conv != null) {
+                clearConversation(user, conv);
+            }
+        } else if (text.startsWith("/usage")) {
+            Conversation.TokenUsage usage = null;
+            try {
+                usage = db.getUsage(user.getId());
+            } catch (SQLException e) {
+                LOGGER.log(System.Logger.Level.DEBUG, "Failed to query tokeCount of user " + user, e);
+            }
+
+            if (usage != null) {
+                sendMessage(user.getId(), "Your token usage: " + usage);
+            } else {
+                sendMessage(user.getId(), "Failed to query your usage count.");
+            }
+        } else if (text.startsWith("/summarize")) {
+            String[] words = text.split("\\s+");
+            if (words.length < 2 || !Summarizer.isValidURL(words[1])) {
+                sendMessage(user.getId(),
+                        "The command is ill-formed, or you provided an illegal URL. The correct syntax: /summarize <url>");
+            } else {
+                URI uri = URI.create(words[1]);
+                try {
+                    String article = Summarizer.extractArticle(uri);
+                    Conversation conv = Summarizer.summarizeArticle(openAI, article, u -> {
+                        if (u.isStart()) {
+                            u.message().messageId().value = sendMessage(user.getId(), u.message().content().toString());
+                        } else {
+                            if (u.message().messageId().value == null) {
+                                throw new IllegalStateException("A message should be sent before it can be edited");
+                            }
+                            editMessage(user.getId(), u.message().messageId().value, u.message().content().toString());
+                        }
+                    });
+                    flushConversationStatistics(user.getId(), conv);
+                } catch (IOException e) {
+                    LOGGER.log(System.Logger.Level.DEBUG, "Failed to extract article at " + uri, e);
+                    sendMessage(user.getId(), "Failed to extract the linked article");
+                }
+            }
+        }
+    }
+
+    private void handleConversation(User user, String text) {
+        Conversation conv = conversationMap.computeIfAbsent(user.getId(), k -> initConversation(user));
+
+        if (conv.latestUpdate().isBefore(Instant.now().minus(CONVERSATION_CLEAR_PERIOD))) {
+            clearConversation(user, conv);
+            conv = initConversation(user);
+            conversationMap.put(user.getId(), conv);
+        }
+
+        conv.recordMessage(ChatRole.USER, MessageContent.finished(text));
+
+        openAI.send(Long.toString(user.getId()) /* TODO: We might not want to send the telegram id to OpenAI */,
+                conv, u -> {
+            if (u.isStart()) {
+                u.message().messageId().value = sendMessage(user.getId(), u.message().content().toString());
+            } else {
+                if (u.message().messageId().value == null) {
+                    throw new IllegalStateException("A message should be sent before it can be edited");
+                }
+                editMessage(user.getId(), u.message().messageId().value, u.message().content().toString());
+            }
+        });
+    }
+
+    private Conversation initConversation(User user) {
+        Conversation c = new Conversation();
+        c.recordMessage(ChatRole.SYSTEM,
+                MessageContent.finished("You are a chat assistant inside a Telegram Bot talking with "
+                        + user.getFirstName() + ". Give concise answers."));
+        return c;
+    }
+
+    private void clearConversation(User user, Conversation conv) {
+        flushConversationStatistics(user.getId(), conv);
+        sendMessage(user.getId(), "Conversation cleared");
+    }
+
+    /**
+     * @param userId
+     * @param conv
+     * @return true, if the Conversation's tokenUsage is not 0.
+     */
+    private boolean flushConversationStatistics(long userId, Conversation conv) {
+        Conversation.TokenUsage tokenUsage = conv.resetTokenUsage();
+        if (!(tokenUsage.promptToken() == 0 && tokenUsage.completionToken() == 0)) {
+            try {
+                db.writeUsage(userId, tokenUsage);
+                return true;
+            } catch (SQLException e) {
+                LOGGER.log(System.Logger.Level.DEBUG, "Failed to increase tokeCount of user with id " + userId, e);
+            }
+        }
+
+        return false;
+    }
 
     private int sendMessage(long userId, String message) {
         try {
@@ -62,7 +200,7 @@ public class Bot extends TelegramLongPollingBot {
 
             return sentMessage.getMessageId();
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            LOGGER.log(System.Logger.Level.DEBUG, "Failure at sending message", e);
             throw new RuntimeException(e);
         }
     }
@@ -76,85 +214,7 @@ public class Bot extends TelegramLongPollingBot {
                     .build();
             execute(editRequest);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            LOGGER.log(System.Logger.Level.DEBUG, "Failure at editing message", e);
         }
-    }
-
-    private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
-
-    @Override
-    public void onUpdateReceived(Update update) {
-        Message message = update.getMessage();
-        var user = message.getFrom();
-
-        LOGGER.log(System.Logger.Level.INFO, "{0}: {1}", user.getId(), message.getText());
-        if (!whiteListedUserIds.contains(user.getId())) {
-            LOGGER.log(System.Logger.Level.WARNING,
-                    "User {0} interacted with the bot, while not being part of the whitelist.", user);
-            sendMessage(user.getId(), "You are not allowed to interact with this bot!");
-            return;
-        }
-
-        List<Conversation> conversations = userConversations.computeIfAbsent(user.getId(), k -> {
-            LOGGER.log(System.Logger.Level.INFO, "Number of users: {0}", userConversations.size() + 1);
-            var list = new ArrayList<Conversation>();
-            list.add(new Conversation());
-            return list;
-        });
-
-        if (message.isCommand() && message.getText().startsWith("/clear")) {
-            conversations.add(new Conversation());
-            sendMessage(user.getId(), "Conversation cleared");
-            return;
-        }
-
-        Conversation conversation = conversations.get(conversations.size()-1);
-
-        if (conversation.lastUpdate().isBefore(Instant.now().minus(10, ChronoUnit.MINUTES))) {
-            sendMessage(user.getId(), "Conversation cleared due to timeout");
-            conversation = new Conversation();
-            conversations.add(conversation);
-        }
-
-        if (conversation.getTurnStream().findAny().isEmpty()) {
-            conversation.recordMessage(ChatMessageRole.SYSTEM.value(),
-                    "You are a chat assistant inside a Telegram Bot. Give concise answers.");
-        }
-        conversation.recordMessage(ChatMessageRole.USER.value(), message.getText());
-
-        ChatCompletionRequest chatRequest = ChatCompletionRequest
-                .builder()
-                .model("gpt-4-0613")
-                .messages(conversation.getTurnStream().map(c -> new ChatMessage(c.role(), c.message())).toList())
-                .n(1)
-                .build();
-
-        class MessageId {
-            int id = -1;
-            int diffSum = 0;
-        }
-        final var finalConversation = conversation;
-        executor.submit(() -> {
-            final MessageId messageId = new MessageId();
-            finalConversation.initMessageReconstruction(ChatMessageRole.ASSISTANT.value(), (s, diff) -> {
-                messageId.diffSum += diff.isLeft() ? diff.left() : 0;
-
-                if (messageId.id == -1) {
-                    if (s != null && !"".equals(s)) {
-                        messageId.id = sendMessage(user.getId(), s);
-                        messageId.diffSum = 0;
-                    }
-                } else {
-                    if (messageId.diffSum > 10 || diff.isRight()) {
-                        String postfix = (diff.isRight() && !"stop".equals(diff.right())) ? (" [" + diff.right().toUpperCase() + "]") : "";
-                        editMessage(user.getId(), messageId.id, s + postfix);
-                        messageId.diffSum = 0;
-                    }
-                }
-            });
-            openAiService.streamChatCompletion(chatRequest)
-                    .doOnError(Throwable::printStackTrace)
-                    .blockingForEach(finalConversation::addChunk);
-        });
     }
 }
