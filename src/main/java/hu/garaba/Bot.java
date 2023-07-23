@@ -83,7 +83,11 @@ public class Bot extends TelegramLongPollingBot {
             if (message.isCommand()) {
                 handleCommand(user, message.getText());
             } else {
-                handleConversation(user, message.getText());
+                if (!message.getText().contains(" ") && Summarizer.isValidURL(message.getText())) {
+                    handleCommand(user, "/summarize " + message.getText());
+                } else {
+                    handleConversation(user, message.getText());
+                }
             }
         });
     }
@@ -115,6 +119,7 @@ public class Bot extends TelegramLongPollingBot {
             } else {
                 URI uri = URI.create(words[1]);
                 try {
+                    sendMessage(user.getId(), "Summarizing article at " + uri + ":");
                     String article = Summarizer.extractArticle(uri);
                     Conversation conv = Summarizer.summarizeArticle(openAI, article, u -> {
                         if (u.isStart()) {
