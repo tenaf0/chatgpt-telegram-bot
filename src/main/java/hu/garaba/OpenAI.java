@@ -38,13 +38,6 @@ public class OpenAI {
         completions.stream().forEach(c -> {
             var choice = c.getChoices().get(0);
             chatChoiceConsumer.push(choice);
-
-            if (c.getUsage() != null) {
-                CompletionsUsage usage = c.getUsage();
-                System.out.printf("Usage: number of prompt token is %d, "
-                                + "number of completion token is %d, and number of total tokens in request and response is %d.%n",
-                        usage.getPromptTokens(), usage.getCompletionTokens(), usage.getTotalTokens());
-            }
         });
     }
 
