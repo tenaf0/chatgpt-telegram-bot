@@ -18,10 +18,12 @@ public class Conversation {
 
     public void recordMessage(ChatRole role, MessageContent content) {
         messages.add(new Message(Instant.now(), new MutInteger(), role, content));
-        promptToken.addAndGet(OpenAI.approximateTokens(content.toString()));
     }
 
     public MessageUpdater streamMessage(ChatRole role, Consumer<MessageUpdater.Update> updateFn) {
+        int promptTokens = messages.stream().mapToInt(m -> OpenAI.approximateTokens(m.content.toString())).sum();
+        promptToken.addAndGet(promptTokens);
+
         Message message = new Message(Instant.now(), new MutInteger(), role, MessageContent.create(""));
         messages.add(message);
 
