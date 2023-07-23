@@ -7,6 +7,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 
 public class Database {
+    private static final System.Logger LOGGER = System.getLogger(Database.class.getCanonicalName());
+
     private final Connection connection;
 
     public Database(Path path) throws SQLException {
@@ -46,6 +48,15 @@ public class Database {
             if (i != 1) {
                 throw new SQLException("Failed to update usage of user " + userId);
             }
+        }
+    }
+
+    public void close() {
+        try {
+            LOGGER.log(System.Logger.Level.DEBUG, "Closing database connection");
+            connection.close();
+        } catch (SQLException e) {
+            LOGGER.log(System.Logger.Level.WARNING, e);
         }
     }
 }

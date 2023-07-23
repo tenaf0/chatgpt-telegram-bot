@@ -20,7 +20,7 @@ import java.util.Map;
 import java.util.concurrent.*;
 
 public class Bot extends TelegramLongPollingBot {
-    public static final System.Logger LOGGER = System.getLogger(Bot.class.getCanonicalName());
+    private static final System.Logger LOGGER = System.getLogger(Bot.class.getCanonicalName());
 
     private static final String OPENAI_API_KEY = System.getenv("OPENAI_API_KEY");
     private static final String TELEGRAM_API_KEY = System.getenv("TELEGRAM_API_KEY");
@@ -66,6 +66,7 @@ public class Bot extends TelegramLongPollingBot {
     public synchronized void onClosing() {
         LOGGER.log(System.Logger.Level.DEBUG, "Bot shutting down");
         super.onClosing();
+        db.close();
     }
 
     @Override
