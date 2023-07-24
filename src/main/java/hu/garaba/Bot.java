@@ -17,13 +17,14 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.*;
 
 public class Bot extends TelegramLongPollingBot {
     private static final System.Logger LOGGER = System.getLogger(Bot.class.getCanonicalName());
 
-    private static final String OPENAI_API_KEY = System.getenv("OPENAI_API_KEY");
-    private static final String TELEGRAM_API_KEY = System.getenv("TELEGRAM_API_KEY");
+    private static final String OPENAI_API_KEY = Objects.requireNonNull(System.getenv("OPENAI_API_KEY"));
+    private static final String TELEGRAM_API_KEY = Objects.requireNonNull(System.getenv("TELEGRAM_API_KEY"));
 
     private final OpenAI openAI = new OpenAI(OPENAI_API_KEY);
     private final Database db;
@@ -119,9 +120,16 @@ public class Bot extends TelegramLongPollingBot {
             } else {
                 URI uri = URI.create(words[1]);
                 try {
-                    sendMessage(user.getId(), "Summarizing article at " + uri + ":");
-                    String article = Summarizer.extractArticle(uri);
-                    Conversation conv = Summarizer.summarizeArticle(openAI, article, u -> {
+                    String textToSummarize;
+                    if (Objects.equals(uri.getHost(), "www.youtube.com")) {
+                        sendMessage(user.getId(), "Summarizing video transcript at " + uri + ":");
+                        textToSummarize = Summarizer.extractVideoTranscript(uri);
+                    } else {
+                        sendMessage(user.getId(), "Summarizing article at " + uri + ":");
+                        textToSummarize = Summarizer.extractArticle(uri);
+                    }
+
+                    Conversation conv = Summarizer.summarizeArticle(openAI, textToSummarize, u -> {
                         if (u.isStart()) {
                             u.message().messageId().value = sendMessage(user.getId(), u.message().content().toString());
                         } else {

@@ -4,7 +4,7 @@
   outputs = { self, nixpkgs }:
     let
       pkgs = nixpkgs.legacyPackages.x86_64-linux.pkgs;
-      charset-normalizer = with pkgs.python3Packages; toPythonModule (pkgs.python3Packages.charset-normalizer.overrideAttrs (old: rec {
+      my-charset-normalizer = with pkgs.python3Packages; toPythonModule (pkgs.python3Packages.charset-normalizer.overrideAttrs (old: rec {
                                                        version = "3.1.0";
                                                        src = pkgs.fetchFromGitHub {
                                                              owner = "Ousret";
@@ -13,6 +13,9 @@
                                                              hash = "sha256-uJSJFy4jD0CxpNaczBXDMGmu2M+G6Dk06pYO6q4asCY=";
                                                            };
                                                      }));
+      my-requests = with pkgs.python3Packages; toPythonModule (pkgs.python3Packages.requests.override {
+                                                             charset-normalizer = my-charset-normalizer;
+                                                           });
       htmldate = with pkgs.python3Packages; buildPythonPackage {
                                       pname = "htmldate";
                                       version = "1.4.3";
@@ -22,7 +25,7 @@
                                         sha256 = "sha256-7FDwhLmX/fayb4wxRH5XifTetx/mk0LNodevDJ+R4Bs=";
                                       };
 
-                                      propagatedBuildInputs = [ charset-normalizer python-dateutil dateparser lxml urllib3 ];
+                                      propagatedBuildInputs = [ my-charset-normalizer python-dateutil dateparser lxml urllib3 ];
                                       doCheck = false;
                                   };
       courlan = with pkgs.python3Packages; buildPythonPackage {
@@ -61,7 +64,19 @@
                           propagatedBuildInputs = [ courlan certifi jusText htmldate ];
                           doCheck = false;
                       };
-      pythonEnv = pkgs.python3.withPackages(ps: [ trafilatura ]);
+      youtube-transcript-api = with pkgs.python3Packages; buildPythonPackage {
+                                                         pname = "youtube-transcript-api";
+                                                         version = "0.6.0";
+                                                         src = fetchPypi {
+                                                           pname = "youtube_transcript_api";
+                                                           version = "0.6.1";
+                                                           sha256 = "sha256-vBSOpoevfY6AhT1M0AXH0ohZEGpetVAXIv09rJ+baL4=";
+                                                         };
+
+                                                         propagatedBuildInputs = [ my-requests ];
+                                                         doCheck = false;
+                                                     };
+      pythonEnv = pkgs.python3.withPackages(ps: [ trafilatura youtube-transcript-api ]);
     in {
       devShells.x86_64-linux.default = with pkgs; mkShell {
         buildInputs = [ openjdk19 ];
@@ -69,5 +84,6 @@
         };
 
       packages.x86_64-linux.trafilatura = trafilatura;
+      packages.x86_64-linux.youtube-transcript-api = youtube-transcript-api;
   };
 }

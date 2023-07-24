@@ -8,12 +8,18 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class Summarizer {
     private static final System.Logger LOGGER = System.getLogger(Summarizer.class.getCanonicalName());
 
     public static boolean isValidURL(String url) {
+        if (!url.contains(".")) {
+            return false;
+        }
+
         try {
             new URI(url);
 
@@ -26,6 +32,23 @@ public class Summarizer {
     public static String extractArticle(URI uri) throws IOException {
         LOGGER.log(System.Logger.Level.DEBUG, "Starting extraction of article at " + uri.getHost());
         Process extractorProcess = new ProcessBuilder("trafilatura", "-u", uri.toString())
+                .start();
+
+        try (BufferedReader bufferedReader = extractorProcess.inputReader(StandardCharsets.UTF_8)) {
+            return bufferedReader.lines().collect(Collectors.joining("\n"));
+        }
+    }
+
+    private static final Pattern videoIdPattern = Pattern.compile("v=([^&]+)");
+    public static String extractVideoTranscript(URI youtubeUrl) throws IOException {
+        LOGGER.log(System.Logger.Level.DEBUG, "Starting extraction of video");
+
+        Matcher matcher = videoIdPattern.matcher(youtubeUrl.getQuery());
+        if (!matcher.find()) {
+            throw new IllegalArgumentException("Video url " + youtubeUrl + "'s video id could not be extracted from URL");
+        }
+        String videoId = matcher.group(1);
+        Process extractorProcess = new ProcessBuilder("youtube_transcript_api", videoId, "--format", "text")
                 .start();
 
         try (BufferedReader bufferedReader = extractorProcess.inputReader(StandardCharsets.UTF_8)) {
