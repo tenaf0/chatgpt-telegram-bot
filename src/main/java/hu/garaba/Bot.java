@@ -140,7 +140,7 @@ public class Bot extends TelegramLongPollingBot {
                         }
                     });
                     flushConversationStatistics(user.getId(), conv);
-                } catch (IOException e) {
+                } catch (Exception e) {
                     LOGGER.log(System.Logger.Level.DEBUG, "Failed to extract article at " + uri, e);
                     sendMessage(user.getId(), "Failed to extract the linked article");
                 }

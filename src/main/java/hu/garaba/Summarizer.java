@@ -29,17 +29,25 @@ public class Summarizer {
         }
     }
 
+    private static String collectOutput(Process extractorProcess) throws IOException {
+        try (BufferedReader bufferedReader = extractorProcess.inputReader(StandardCharsets.UTF_8);
+             BufferedReader errorReader = extractorProcess.errorReader()) {
+            String output = bufferedReader.lines().collect(Collectors.joining("\n"));
+            errorReader.lines().forEach(l -> LOGGER.log(System.Logger.Level.DEBUG, l));
+            return output;
+        }
+    }
+
     public static String extractArticle(URI uri) throws IOException {
         LOGGER.log(System.Logger.Level.DEBUG, "Starting extraction of article at " + uri.getHost());
         Process extractorProcess = new ProcessBuilder("trafilatura", "-u", uri.toString())
                 .start();
 
-        try (BufferedReader bufferedReader = extractorProcess.inputReader(StandardCharsets.UTF_8)) {
-            return bufferedReader.lines().collect(Collectors.joining("\n"));
-        }
+        return collectOutput(extractorProcess);
     }
 
     private static final Pattern videoIdPattern = Pattern.compile("v=([^&]+)");
+
     public static String extractVideoTranscript(URI youtubeUrl) throws IOException {
         LOGGER.log(System.Logger.Level.DEBUG, "Starting extraction of video");
 
@@ -51,12 +59,14 @@ public class Summarizer {
         Process extractorProcess = new ProcessBuilder("youtube_transcript_api", videoId, "--format", "text")
                 .start();
 
-        try (BufferedReader bufferedReader = extractorProcess.inputReader(StandardCharsets.UTF_8)) {
-            return bufferedReader.lines().collect(Collectors.joining("\n"));
-        }
+        return collectOutput(extractorProcess);
     }
 
     public static Conversation summarizeArticle(OpenAI openAI, String text, Consumer<MessageUpdater.Update> updateFn) {
+        if (text.isBlank()) {
+            throw new IllegalArgumentException("Got empty text to summarize");
+        }
+
         Conversation conversation = new Conversation();
         conversation.recordMessage(ChatRole.SYSTEM,
                 MessageContent.finished("You are to provide a comprehensive summary of the given text. The summary should cover all the key points and main ideas presented in the original text, while also condensing the information into a concise and easy-to-understand format. Please ensure that the summary includes relevant details and examples that support the main ideas, while avoiding any unnecessary information or repetition. The length of the summary should be appropriate for the length and complexity of the original text, providing a clear and accurate overview without omitting any important information."));
