@@ -73,11 +73,13 @@ public class Bot extends TelegramLongPollingBot {
     @Override
     public void onUpdateReceived(Update update) {
         Message message = update.getMessage();
-        User user = message.getFrom();
+        User user = message != null ? message.getFrom() : null;
 
         executor.submit(() -> {
-            if (!db.isWhitelisted(user.getId())) {
-                sendMessage(user.getId(), "You are not authorized to access this bot.");
+            if (user == null || !db.isWhitelisted(user.getId())) {
+                if (user != null) {
+                    sendMessage(user.getId(), "You are not authorized to access this bot.");
+                }
                 throw new SecurityException("User " + user + " accessed the bot, but was not found in the whitelist table.");
             }
 
