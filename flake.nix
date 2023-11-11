@@ -1,9 +1,9 @@
 {
   description = "A very basic flake";
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, flake-utils }: flake-utils.lib.eachDefaultSystem (system: 
     let
-      pkgs = nixpkgs.legacyPackages.x86_64-linux.pkgs;
+      pkgs = nixpkgs.legacyPackages.${system}.pkgs;
       my-charset-normalizer = with pkgs.python3Packages; toPythonModule (pkgs.python3Packages.charset-normalizer.overrideAttrs (old: rec {
                                                        version = "3.1.0";
                                                        src = pkgs.fetchFromGitHub {
@@ -78,12 +78,12 @@
                                                      };
       pythonEnv = pkgs.python3.withPackages(ps: [ trafilatura youtube-transcript-api ]);
     in {
-      devShells.x86_64-linux.default = with pkgs; mkShell {
+      devShells.default = with pkgs; mkShell {
         buildInputs = [ openjdk19 ];
         packages = [ pythonEnv ];
         };
 
-      packages.x86_64-linux.trafilatura = trafilatura;
-      packages.x86_64-linux.youtube-transcript-api = youtube-transcript-api;
-  };
+      packages.trafilatura = trafilatura;
+      packages.youtube-transcript-api = youtube-transcript-api;
+  });
 }
