@@ -123,7 +123,7 @@ public class Bot extends TelegramLongPollingBot {
                 URI uri = URI.create(words[1]);
                 try {
                     String textToSummarize;
-                    if (Objects.equals(uri.getHost(), "www.youtube.com")) {
+                    if (uri.getHost() != null && uri.getHost().replace(".", "").contains("youtube")) {
                         sendMessage(user.getId(), "Summarizing video transcript at " + uri + ":");
                         textToSummarize = Summarizer.extractVideoTranscript(uri);
                     } else {

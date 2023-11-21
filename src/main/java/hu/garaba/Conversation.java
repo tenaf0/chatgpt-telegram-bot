@@ -16,7 +16,7 @@ public class Conversation {
     private final AtomicInteger promptToken = new AtomicInteger(0);
     private final AtomicInteger completionToken = new AtomicInteger(0);
 
-    public void recordMessage(ChatRole role, MessageContent content) {
+    public synchronized void recordMessage(ChatRole role, MessageContent content) {
         messages.add(new Message(Instant.now(), new MutInteger(), role, content));
     }
 
