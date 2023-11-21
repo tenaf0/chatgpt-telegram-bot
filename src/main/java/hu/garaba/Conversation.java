@@ -47,6 +47,6 @@ public class Conversation {
     }
 
     public List<ChatMessage> packageMessages() {
-        return messages.stream().map(m -> new ChatMessage(m.role).setContent(m.content.toString())).toList();
+        return messages.stream().map(m -> new ChatMessage(m.role, m.content.toString())).toList();
     }
 }

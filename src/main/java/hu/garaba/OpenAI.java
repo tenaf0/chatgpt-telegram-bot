@@ -3,6 +3,7 @@ package hu.garaba;
 import com.azure.ai.openai.OpenAIClient;
 import com.azure.ai.openai.OpenAIClientBuilder;
 import com.azure.ai.openai.models.*;
+import com.azure.core.credential.KeyCredential;
 import com.azure.core.util.IterableStream;
 
 import java.util.function.Consumer;
@@ -23,7 +24,7 @@ public class OpenAI {
 
     public OpenAI(String OPENAI_API_KEY) {
         this.client = new OpenAIClientBuilder()
-                .credential(new NonAzureOpenAIKeyCredential(OPENAI_API_KEY))
+                .credential(new KeyCredential(OPENAI_API_KEY))
                 .buildClient();
     }
 
