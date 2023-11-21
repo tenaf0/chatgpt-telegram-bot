@@ -79,7 +79,7 @@
       pythonEnv = pkgs.python3.withPackages(ps: [ trafilatura youtube-transcript-api ]);
     in {
       devShells.default = with pkgs; mkShell {
-        buildInputs = [ openjdk19 ];
+        buildInputs = [ openjdk ];
         packages = [ pythonEnv ];
         };
 
