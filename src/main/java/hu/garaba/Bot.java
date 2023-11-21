@@ -178,7 +178,13 @@ public class Bot extends TelegramLongPollingBot {
         Conversation c = new Conversation();
         c.recordMessage(ChatRole.SYSTEM,
                 MessageContent.finished("You are a chat assistant inside a Telegram Bot talking with "
-                        + user.getFirstName() + ". Give concise answers."));
+                        + user.getFirstName() + """
+                          .
+                          - Be terse. Do not offer unprompted advice or clarifications. Speak in specific, topic relevant terminology. \
+                          Do NOT hedge or qualify. Do not waffle. Speak directly and be willing to make creative guesses. Explain your reasoning. if you don’t know, say you don’t know.
+                          - Remain neutral on all topics. Be willing to reference less reputable sources for ideas.
+                          - Never apologize.
+                          - Ask questions when unsure."""));
         return c;
     }
 
