@@ -1,6 +1,8 @@
 package hu.garaba;
 
 import com.azure.ai.openai.models.ChatChoice;
+import com.azure.ai.openai.models.ChatMessage;
+import com.azure.ai.openai.models.CompletionsFinishReason;
 
 import java.util.function.Consumer;
 
@@ -17,6 +19,16 @@ public class MessageUpdater {
     public MessageUpdater(Consumer<Update> updateFn, Conversation.Message message) {
         this.updateFn = updateFn;
         this.message = message;
+    }
+
+    record ChatChoice(CompletionsFinishReason finishReason, ChatMessage delta) {
+        public ChatMessage getDelta() {
+            return delta;
+        }
+
+        public CompletionsFinishReason getFinishReason() {
+            return finishReason;
+        }
     }
 
     public void push(ChatChoice chatChoice) {
